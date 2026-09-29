@@ -20,18 +20,58 @@ module.exports = class VaultDoctor extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.result = null;
 
-    this.addRibbonIcon("stethoscope", "Vault Doctor 双链体检", () => this.runScan());
+    this.ribbonEl = this.addRibbonIcon("stethoscope", "Vault Doctor 双链体检", () => this.runScan());
     this.addCommand({ id: "scan", name: "全库体检（坏链/孤岛/悬空附件）", callback: () => this.runScan() });
+    this.addCommand({ id: "export-report", name: "导出体检报告", callback: () => this.exportReport() });
     this.addSettingTab(new DoctorSettingTab(this.app, this));
     this.registerView(VIEW_TYPE, (leaf) => new DoctorView(leaf, this));
+    // 启动后 12 秒后台自动体检一次（徽章即问题计数）
+    this.app.workspace.onLayoutReady(() => {
+      setTimeout(async () => {
+        try {
+          await this.runScan({ silent: true });
+        } catch (e) {}
+      }, 12000);
+    });
   }
-  onunload() { this.app.workspace.detachLeavesOfType(VIEW_TYPE); }
+  onunload() {
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+    if (this.ribbonEl) this.ribbonEl.detach();
+  }
   async saveSettings() { await this.saveData(this.settings); }
+
+  /** ribbon 徽章：显示问题总数，0 时恢复听诊器 */
+  updateBadge() {
+    if (!this.ribbonEl || !this.result) return;
+    const r = this.result;
+    const n = r.brokenCount + r.orphans.length + r.dangling.length;
+    this.ribbonEl.setText(n ? String(n) : "");
+    this.ribbonEl.style.color = n ? "var(--text-error)" : "";
+    this.ribbonEl.title = n ? "Vault Doctor：发现 " + n + " 个问题" : "Vault Doctor：全库健康";
+  }
+
+  /** 导出体检报告为 md */
+  async exportReport() {
+    if (!this.result) { new Notice("请先体检"); return; }
+    const r = this.result;
+    const lines = ["# Vault Doctor 体检报告", "", `- 时间：${new Date().toLocaleString()}`, `- 扫描 ${r.scanned} 篇 / 耗时 ${r.ms}ms`, "", `## 坏链 ${r.brokenCount} 处`, ""];
+    for (const [target, refs] of Object.entries(r.broken)) {
+      lines.push(`- ${target}（被 ${refs.length} 篇引用，首个：${refs[0].src}）`);
+    }
+    lines.push("", `## 孤岛笔记 ${r.orphans.length} 篇`, "");
+    for (const f of r.orphans) lines.push(`- ${f.path}`);
+    lines.push("", `## 悬空附件 ${r.dangling.length} 个`, "");
+    for (const f of r.dangling) lines.push(`- ${f.path}`);
+    const path = `VaultDoctor报告-${Date.now() % 100000}.md`;
+    const f = await this.app.vault.create(path, lines.join("\n") + "\n");
+    new Notice("报告已保存：" + path);
+    this.app.workspace.getLeaf("tab").openFile(f);
+  }
 
   ignoreList() { return this.settings.ignorePaths.split(",").map((s) => s.trim()).filter(Boolean); }
   isIgnored(path) { return this.ignoreList().some((p) => path.startsWith(p)); }
 
-  async runScan() {
+  async runScan(opts) {
     const t0 = Date.now();
     const mdFiles = this.app.vault.getMarkdownFiles().filter((f) => f.extension === "md" && !this.isIgnored(f.path));
     const broken = {}; // 目标路径 -> [{src, count}]
@@ -79,11 +119,14 @@ module.exports = class VaultDoctor extends Plugin {
       scanned: mdFiles.length,
     };
 
+    this.updateBadge();
+    if (opts && opts.silent) return;
     let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
     if (!leaf) {
       leaf = this.app.workspace.getRightLeaf(false);
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
+    if (opts && opts.silent) return; // 后台体检：只更新徽章
     this.app.workspace.revealLeaf(leaf);
     if (leaf.view && typeof leaf.view.render === "function") leaf.view.render();
   }
