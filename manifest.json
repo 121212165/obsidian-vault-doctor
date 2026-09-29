@@ -1,0 +1,9 @@
+{
+  "id": "vault-doctor",
+  "name": "Vault Doctor",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Link health center for your vault: scan broken links, orphan notes and dangling attachments in one dashboard, create missing notes with one click, and ignore false positives.",
+  "author": "121212165",
+  "isDesktopOnly": false
+}
