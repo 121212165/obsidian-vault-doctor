@@ -11,7 +11,7 @@ const VIEW_TYPE = "vault-doctor-view";
 const ATTACH_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "pdf", "mp3", "wav", "ogg", "webm", "mp4", "mov", "m4a", "flac", "docx", "xlsx", "pptx", "zip"]);
 
 const DEFAULT_SETTINGS = {
-  ignorePaths: "模板, templates, 90-Assets", // 忽略的路径前缀（逗号分隔）
+  ignorePaths: "templates, 90-Assets", // 忽略的路径前缀（逗号分隔）
   ignoreTags: "", // 含这些 tag 的笔记跳过孤岛判定（逗号分隔）
 };
 
@@ -20,9 +20,9 @@ module.exports = class VaultDoctor extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.result = null;
 
-    this.ribbonEl = this.addRibbonIcon("stethoscope", "Vault Doctor 双链体检", () => this.runScan());
-    this.addCommand({ id: "scan", name: "全库体检（坏链/孤岛/悬空附件）", callback: () => this.runScan() });
-    this.addCommand({ id: "export-report", name: "导出体检报告", callback: () => this.exportReport() });
+    this.ribbonEl = this.addRibbonIcon("stethoscope", "Vault Doctor — link health scan", () => this.runScan());
+    this.addCommand({ id: "scan", name: "Full vault scan (broken links / orphans / dangling attachments)", callback: () => this.runScan() });
+    this.addCommand({ id: "export-report", name: "Export health report", callback: () => this.exportReport() });
     this.addSettingTab(new DoctorSettingTab(this.app, this));
     this.registerView(VIEW_TYPE, (leaf) => new DoctorView(leaf, this));
     // 启动后 12 秒后台自动体检一次（徽章即问题计数）
@@ -47,24 +47,24 @@ module.exports = class VaultDoctor extends Plugin {
     const n = r.brokenCount + r.orphans.length + r.dangling.length;
     this.ribbonEl.setText(n ? String(n) : "");
     this.ribbonEl.style.color = n ? "var(--text-error)" : "";
-    this.ribbonEl.title = n ? "Vault Doctor：发现 " + n + " 个问题" : "Vault Doctor：全库健康";
+    this.ribbonEl.title = n ? "Vault Doctor: " + n + " issue(s) found" : "Vault Doctor: all healthy";
   }
 
   /** 导出体检报告为 md */
   async exportReport() {
-    if (!this.result) { new Notice("请先体检"); return; }
+    if (!this.result) { new Notice("Run a scan first"); return; }
     const r = this.result;
-    const lines = ["# Vault Doctor 体检报告", "", `- 时间：${new Date().toLocaleString()}`, `- 扫描 ${r.scanned} 篇 / 耗时 ${r.ms}ms`, "", `## 坏链 ${r.brokenCount} 处`, ""];
+    const lines = ["# Vault Doctor Health Report", "", `- Time: ${new Date().toLocaleString()}`, `- Scanned ${r.scanned} notes in ${r.ms}ms`, "", `## Broken links: ${r.brokenCount}`, ""];
     for (const [target, refs] of Object.entries(r.broken)) {
-      lines.push(`- ${target}（被 ${refs.length} 篇引用，首个：${refs[0].src}）`);
+      lines.push(`- ${target} (referenced by ${refs.length} note(s), first: ${refs[0].src})`);
     }
-    lines.push("", `## 孤岛笔记 ${r.orphans.length} 篇`, "");
+    lines.push("", `## Orphan notes: ${r.orphans.length}`, "");
     for (const f of r.orphans) lines.push(`- ${f.path}`);
-    lines.push("", `## 悬空附件 ${r.dangling.length} 个`, "");
+    lines.push("", `## Dangling attachments: ${r.dangling.length}`, "");
     for (const f of r.dangling) lines.push(`- ${f.path}`);
-    const path = `VaultDoctor报告-${Date.now() % 100000}.md`;
+    const path = `VaultDoctor-report-${Date.now() % 100000}.md`;
     const f = await this.app.vault.create(path, lines.join("\n") + "\n");
-    new Notice("报告已保存：" + path);
+    new Notice("Report saved: " + path);
     this.app.workspace.getLeaf("tab").openFile(f);
   }
 
@@ -143,10 +143,10 @@ module.exports = class VaultDoctor extends Plugin {
     const path = (dir ? dir + "/" : "") + clean + ".md";
     try {
       const f = await this.app.vault.create(path, "");
-      new Notice("已创建：" + path);
+      new Notice("Created: " + path);
       this.app.workspace.getLeaf("tab").openFile(f);
     } catch (e) {
-      new Notice("创建失败（可能已存在）：" + e.message);
+      new Notice("Create failed (may already exist): " + e.message);
     }
   }
 };
@@ -165,14 +165,14 @@ class DoctorView extends ItemView {
     const plugin = this.plugin;
     const r = plugin.result;
     contentEl.empty();
-    contentEl.createEl("h4", { text: "🩺 Vault Doctor 双链健康中心" });
+    contentEl.createEl("h4", { text: "🩺 Vault Doctor — Link Health Center" });
 
-    const scanBtn = contentEl.createEl("button", { text: "全库体检", cls: "mod-cta" });
+    const scanBtn = contentEl.createEl("button", { text: "Scan whole vault", cls: "mod-cta" });
     scanBtn.style.marginBottom = "8px";
     scanBtn.onclick = () => plugin.runScan();
 
     if (!r) {
-      contentEl.createEl("div", { text: "点「全库体检」开始。", attr: { style: "color:var(--text-muted);" } });
+      contentEl.createEl("div", { text: "Press 'Scan whole vault' to start.", attr: { style: "color:var(--text-muted);" } });
       return;
     }
 
@@ -186,12 +186,12 @@ class DoctorView extends ItemView {
       c.createEl("div", { text: label, attr: { style: "font-size:11px; color:var(--text-muted);" } });
     };
     const hasIssue = r.brokenCount > 0 || r.orphans.length > 0 || r.dangling.length > 0;
-    cell("坏链", r.brokenCount, r.brokenCount ? "var(--text-error)" : "var(--text-success)");
-    cell("孤岛笔记", r.orphans.length, r.orphans.length ? "var(--text-warning)" : "var(--text-success)");
-    cell("悬空附件", r.dangling.length, r.dangling.length ? "var(--text-warning)" : "var(--text-success)");
-    cell("体检耗时", r.ms + "ms");
+    cell("Broken links", r.brokenCount, r.brokenCount ? "var(--text-error)" : "var(--text-success)");
+    cell("Orphan notes", r.orphans.length, r.orphans.length ? "var(--text-warning)" : "var(--text-success)");
+    cell("Dangling attachments", r.dangling.length, r.dangling.length ? "var(--text-warning)" : "var(--text-success)");
+    cell("Scan time", r.ms + "ms");
     contentEl.createEl("div", {
-      text: `已扫描 ${r.scanned} 篇笔记` + (hasIssue ? "" : " · ✅ 全库健康"),
+      text: `Scanned ${r.scanned} notes` + (hasIssue ? "" : " · ✅ all healthy"),
       attr: { style: "font-size:11px; color:var(--text-muted); margin-bottom:8px;" },
     });
 
@@ -200,15 +200,15 @@ class DoctorView extends ItemView {
     if (brokenEntries.length) {
       const sec = contentEl.createEl("details");
       sec.open = true;
-      sec.createEl("summary", { text: `🔗 坏链目标 ${brokenEntries.length} 个（点击创建缺失笔记）`, attr: { style: "font-weight:600; color:var(--text-error); cursor:pointer;" } });
+      sec.createEl("summary", { text: `🔗 ${brokenEntries.length} broken link target(s) (click to create missing notes)`, attr: { style: "font-weight:600; color:var(--text-error); cursor:pointer;" } });
       for (const [target, refs] of brokenEntries) {
         const row = sec.createDiv();
         row.style.cssText = "display:flex; align-items:center; gap:6px; padding:3px 4px; border-bottom:1px solid var(--background-modifier-border); font-size:12px;";
         const txt = row.createDiv();
         txt.style.flex = "1";
         txt.createEl("div", { text: target, attr: { style: "font-weight:600;" } });
-        txt.createEl("div", { text: `被 ${refs.length} 篇引用（${refs.reduce((s, x) => s + x.count, 0)} 处）｜ 首个来源：${refs[0].src}`, attr: { style: "color:var(--text-muted); font-size:11px;" } });
-        const create = row.createEl("button", { text: "+创建", cls: "mod-cta" });
+        txt.createEl("div", { text: `referenced by ${refs.length} note(s) (${refs.reduce((s, x) => s + x.count, 0)} ref(s)) · first source: ${refs[0].src}`, attr: { style: "color:var(--text-muted); font-size:11px;" } });
+        const create = row.createEl("button", { text: "+ Create", cls: "mod-cta" });
         create.style.padding = "2px 8px";
         create.onclick = () => plugin.createMissing(target);
         txt.getFirstChild && null;
@@ -220,14 +220,14 @@ class DoctorView extends ItemView {
           }
         });
         txt.style.cursor = "pointer";
-        txt.title = "点击打开首个引用来源";
+        txt.title = "Open the first referencing note";
       }
     }
 
     // 孤岛
     if (r.orphans.length) {
       const sec = contentEl.createEl("details");
-      sec.createEl("summary", { text: `🏝 孤岛笔记 ${r.orphans.length} 篇（无反链，可能需要互链或归档）`, attr: { style: "font-weight:600; color:var(--text-warning); cursor:pointer;" } });
+      sec.createEl("summary", { text: `🏝 ${r.orphans.length} orphan note(s) (no backlinks — consider linking or archiving)`, attr: { style: "font-weight:600; color:var(--text-warning); cursor:pointer;" } });
       for (const f of r.orphans) {
         const row = sec.createDiv();
         row.style.cssText = "padding:2px 4px; font-size:12px; cursor:pointer;";
@@ -239,7 +239,7 @@ class DoctorView extends ItemView {
     // 悬空附件
     if (r.dangling.length) {
       const sec = contentEl.createEl("details");
-      sec.createEl("summary", { text: `📎 悬空附件 ${r.dangling.length} 个（存在但无引用）`, attr: { style: "font-weight:600; color:var(--text-warning); cursor:pointer;" } });
+      sec.createEl("summary", { text: `📎 ${r.dangling.length} dangling attachment(s) (present but never referenced)`, attr: { style: "font-weight:600; color:var(--text-warning); cursor:pointer;" } });
       for (const f of r.dangling) {
         const row = sec.createDiv();
         row.style.cssText = "padding:2px 4px; font-size:12px; cursor:pointer;";
@@ -255,13 +255,13 @@ class DoctorSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new Setting(containerEl).setName("忽略路径前缀")
-      .setDesc("逗号分隔。这些路径下的文件不参与任何体检")
+    new Setting(containerEl).setName("Ignore path prefixes")
+      .setDesc("Comma separated. Files under these paths are excluded from every check")
       .addText((t) => t.setValue(this.plugin.settings.ignorePaths).onChange(async (v) => {
         this.plugin.settings.ignorePaths = v; await this.plugin.saveSettings();
       }));
-    new Setting(containerEl).setName("孤岛豁免标签")
-      .setDesc("逗号分隔。笔记含这些 tag 时不判为孤岛（如模板、MOC）")
+    new Setting(containerEl).setName("Orphan exemption tags")
+      .setDesc("Comma separated. Notes carrying these tags are never flagged as orphans (e.g. template, MOC)")
       .addText((t) => t.setValue(this.plugin.settings.ignoreTags).onChange(async (v) => {
         this.plugin.settings.ignoreTags = v; await this.plugin.saveSettings();
       }));
